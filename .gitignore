@@ -1,4 +1,5 @@
 __pycache__
+.codegraph/
 *.sock
 *.log
 *.pid
@@ -11,3 +12,4 @@ test.py
 *.ipr
 out/
 gen/
+/.venv/

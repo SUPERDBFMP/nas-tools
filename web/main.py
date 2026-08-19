@@ -34,7 +34,7 @@ from app.speedlimiter import SpeedLimiter
 from app.subscribe import Subscribe
 from app.sync import Sync
 from app.torrentremover import TorrentRemover
-from app.utils import DomUtils, SystemUtils, ExceptionUtils, StringUtils
+from app.utils import DomUtils, SystemUtils, ExceptionUtils, StringUtils, RequestUtils
 from app.utils.types import *
 from config import PT_TRANSFER_INTERVAL, Config
 from web.action import WebAction
@@ -44,6 +44,8 @@ from web.backend.user import User
 from web.backend.wallpaper import get_login_wallpaper
 from web.backend.web_utils import WebUtils
 from web.security import require_auth
+
+DOUBAN_IMAGE_ALLOWED_HOSTS = (".doubanio.com",)
 
 # 配置文件锁
 ConfigLock = Lock()
@@ -1215,6 +1217,37 @@ def dirlist():
 @App.route('/robots.txt', methods=['GET', 'POST'])
 def robots():
     return send_from_directory("", "robots.txt")
+
+
+# 豆瓣图片代理
+@App.route('/douban_image', methods=['GET'])
+@login_required
+def douban_image():
+    image_url = request.args.get("url")
+    if not image_url:
+        return make_response("missing url", 400)
+    try:
+        parsed_url = parse.urlparse(image_url)
+        hostname = parsed_url.hostname or ""
+        if parsed_url.scheme not in ("http", "https") \
+                or not any(hostname == allowed_host[1:] or hostname.endswith(allowed_host)
+                           for allowed_host in DOUBAN_IMAGE_ALLOWED_HOSTS):
+            return make_response("invalid url", 400)
+        image_res = RequestUtils(headers=Config().get_ua(),
+                                 referer="https://movie.douban.com/",
+                                 timeout=10).get_res(image_url, allow_redirects=False)
+        if not image_res:
+            return make_response("image fetch failed", 502)
+        content_type = image_res.headers.get("Content-Type") or "image/jpeg"
+        if not content_type.lower().startswith("image/"):
+            return make_response("invalid image response", 502)
+        response = make_response(image_res.content, image_res.status_code)
+        response.headers["Content-Type"] = content_type
+        response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
+    except Exception as err:
+        ExceptionUtils.exception_traceback(err)
+        return make_response("image proxy failed", 502)
 
 
 # 响应企业微信消息

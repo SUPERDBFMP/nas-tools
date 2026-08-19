@@ -25,6 +25,7 @@ from app.helper import DbHelper, ProgressHelper, ThreadHelper, \
     MetaHelper, DisplayHelper, WordsHelper, CookieCloudHelper
 from app.indexer import Indexer
 from app.media import Category, Media, Bangumi, DouBan
+from app.media.douban import get_douban_image_proxy_url
 from app.media.meta import MetaInfo, MetaBase
 from app.mediaserver import MediaServer
 from app.message import Message, MessageCenter
@@ -1741,7 +1742,7 @@ class WebAction:
                 doubanid=doubanid, mtype=MediaType.MOVIE)
             if not douban_info:
                 return {"code": 1, "retmsg": "无法查询到豆瓣信息"}
-            poster_path = douban_info.get("cover_url") or ""
+            poster_path = get_douban_image_proxy_url(douban_info.get("cover_url") or "")
             title = douban_info.get("title")
             rating = douban_info.get("rating", {}) or {}
             vote_average = rating.get("value") or "无"
@@ -1802,7 +1803,7 @@ class WebAction:
             douban_info = DouBan().get_douban_detail(doubanid=doubanid, mtype=MediaType.TV)
             if not douban_info:
                 return {"code": 1, "retmsg": "无法查询到豆瓣信息"}
-            poster_path = douban_info.get("cover_url") or ""
+            poster_path = get_douban_image_proxy_url(douban_info.get("cover_url") or "")
             title = douban_info.get("title")
             rating = douban_info.get("rating", {}) or {}
             vote_average = rating.get("value") or "无"
@@ -3661,7 +3662,12 @@ class WebAction:
         medias = WebUtils.search_media_infos(keyword=SearchWord,
                                              source=SearchSourceType)
 
-        return {"code": 0, "result": [media.to_dict() for media in medias]}
+        result = []
+        for media in medias:
+            media_info = media.to_dict()
+            media_info["image"] = get_douban_image_proxy_url(media_info.get("image"))
+            result.append(media_info)
+        return {"code": 0, "result": result}
 
     @staticmethod
     def get_movie_rss_list(data=None):

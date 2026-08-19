@@ -1,6 +1,7 @@
 import random
 from threading import Lock
 from time import sleep
+from urllib.parse import quote, urlparse
 
 import zhconv
 
@@ -15,6 +16,15 @@ from app.utils import RequestUtils
 from app.utils.types import MediaType
 
 lock = Lock()
+
+
+def get_douban_image_proxy_url(image_url):
+    if not image_url:
+        return ""
+    hostname = urlparse(image_url).hostname or ""
+    if hostname == "doubanio.com" or hostname.endswith(".doubanio.com"):
+        return "/douban_image?url=%s" % quote(image_url, safe="")
+    return image_url
 
 
 @singleton
@@ -436,7 +446,7 @@ class DouBan:
                 'media_type': mtype.value,
                 'year': year[:4] if year else "",
                 'vote': vote_average,
-                'image': poster_path,
+                'image': get_douban_image_proxy_url(poster_path),
                 'overview': overview
             })
         return ret_infos

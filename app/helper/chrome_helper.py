@@ -1,18 +1,30 @@
 import json
 import os.path
+import re
+import sys
 import tempfile
 import time
+import zipfile
 from functools import reduce
 from threading import Lock
 
+import requests
 import undetected_chromedriver as uc
 from webdriver_manager.chrome import ChromeDriverManager
 
 from app.utils import SystemUtils, RequestUtils
 
+try:
+    import winreg
+except ImportError:
+    winreg = None
+
 lock = Lock()
 
 driver_executable_path = None
+
+CHROME_FOR_TESTING_BUILD_URL = "https://googlechromelabs.github.io/chrome-for-testing/latest-patch-versions-per-build-with-downloads.json"
+CHROME_FOR_TESTING_STABLE_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
 
 
 class ChromeHelper(object):
@@ -38,7 +50,105 @@ class ChromeHelper(object):
         if not uc.find_chrome_executable():
             return
         global driver_executable_path
-        driver_executable_path = ChromeDriverManager().install()
+        chrome_version = self.__get_chrome_version()
+        if chrome_version and int(chrome_version.split(".")[0]) >= 115:
+            try:
+                driver_executable_path = self.__install_chrome_for_testing_driver()
+            except Exception as err:
+                print("ChromeDriver 初始化失败，浏览器渲染相关功能将不可用：%s" % str(err))
+                driver_executable_path = None
+            return
+        try:
+            driver_executable_path = ChromeDriverManager().install()
+        except Exception as err:
+            try:
+                driver_executable_path = self.__install_chrome_for_testing_driver()
+            except Exception as fallback_err:
+                print("ChromeDriver 初始化失败，浏览器渲染相关功能将不可用：%s；%s"
+                      % (str(err), str(fallback_err)))
+                driver_executable_path = None
+
+    def __install_chrome_for_testing_driver(self):
+        chrome_version = self.__get_chrome_version()
+        cft_platform = self.__get_chrome_for_testing_platform()
+        driver_info = self.__get_chrome_for_testing_driver(chrome_version, cft_platform)
+        driver_version = driver_info.get("version")
+        driver_url = driver_info.get("url")
+        if not driver_version or not driver_url:
+            raise RuntimeError("未找到可用的 ChromeDriver 下载地址")
+        driver_filename = "chromedriver.exe" if SystemUtils.is_windows() else "chromedriver"
+        driver_cache_path = os.path.join(tempfile.gettempdir(), "nastool-chromedriver",
+                                         driver_version, cft_platform, driver_filename)
+        if os.path.exists(driver_cache_path):
+            return driver_cache_path
+        os.makedirs(os.path.dirname(driver_cache_path), exist_ok=True)
+        zip_path = os.path.join(tempfile.gettempdir(), "nastool-chromedriver", "%s-%s.zip"
+                                % (driver_version, cft_platform))
+        response = requests.get(driver_url, timeout=30)
+        response.raise_for_status()
+        with open(zip_path, "wb") as zip_file:
+            zip_file.write(response.content)
+        with zipfile.ZipFile(zip_path) as driver_zip:
+            driver_zip.extractall(os.path.dirname(driver_cache_path))
+        for root, _, files in os.walk(os.path.dirname(driver_cache_path)):
+            if driver_filename in files:
+                extracted_path = os.path.join(root, driver_filename)
+                if extracted_path != driver_cache_path:
+                    os.replace(extracted_path, driver_cache_path)
+                if not SystemUtils.is_windows():
+                    os.chmod(driver_cache_path, 0o755)
+                print("已安装 ChromeDriver：%s" % driver_cache_path)
+                return driver_cache_path
+        raise RuntimeError("ChromeDriver 压缩包中未找到 %s" % driver_filename)
+
+    def __get_chrome_for_testing_driver(self, chrome_version, cft_platform):
+        build = ".".join(chrome_version.split(".")[:3]) if chrome_version else ""
+        if build:
+            build_data = requests.get(CHROME_FOR_TESTING_BUILD_URL, timeout=10).json()
+            build_info = (build_data.get("builds") or {}).get(build)
+            if build_info:
+                driver_url = self.__get_driver_url(build_info, cft_platform)
+                if driver_url:
+                    return {"version": build_info.get("version"), "url": driver_url}
+        stable_data = requests.get(CHROME_FOR_TESTING_STABLE_URL, timeout=10).json()
+        stable_info = (stable_data.get("channels") or {}).get("Stable") or {}
+        return {"version": stable_info.get("version"),
+                "url": self.__get_driver_url(stable_info, cft_platform)}
+
+    @staticmethod
+    def __get_driver_url(version_info, cft_platform):
+        for driver in ((version_info.get("downloads") or {}).get("chromedriver") or []):
+            if driver.get("platform") == cft_platform:
+                return driver.get("url")
+        return None
+
+    @staticmethod
+    def __get_chrome_for_testing_platform():
+        if SystemUtils.is_windows():
+            return "win64" if sys.maxsize > 2 ** 32 else "win32"
+        if SystemUtils.is_macos():
+            return "mac-arm64" if "arm" in os.uname().machine.lower() else "mac-x64"
+        return "linux64"
+
+    @staticmethod
+    def __get_chrome_version():
+        if SystemUtils.is_windows():
+            for key_root, key_path in (
+                    (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"Software\Google\Chrome\BLBeacon"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Google\Chrome\BLBeacon")):
+                try:
+                    with winreg.OpenKey(key_root, key_path) as chrome_key:
+                        return winreg.QueryValueEx(chrome_key, "version")[0]
+                except OSError:
+                    pass
+            return None
+        chrome = uc.find_chrome_executable()
+        if not chrome:
+            return None
+        output = os.popen('"%s" --version' % chrome).read()
+        match = re.search(r"(\d+\.\d+\.\d+\.\d+)", output)
+        return match.group(1) if match else None
 
     @property
     def browser(self):
