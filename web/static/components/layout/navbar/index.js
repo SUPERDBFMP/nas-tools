@@ -625,11 +625,16 @@ export class LayoutNavbar extends CustomElement {
           position:fixed;
           top:0;
           left:0;
-          z-index:1031
+          z-index:1031;
+          height: 100vh;
+          max-height: 100vh;
         }
 
         .lit-navbar-canvas {
           width:calc(var(--tblr-offcanvas-width) - 120px)!important;
+          height: 100vh;
+          max-height: 100vh;
+          overflow: hidden;
         }
 
         .theme-light .lit-navbar-canvas {
@@ -645,10 +650,15 @@ export class LayoutNavbar extends CustomElement {
         }
 
         .lit-navbar-hide-scrollbar {
-          overflow-y: scroll!important;
+          min-height: 0;
+          overflow-y: auto!important;
           overscroll-behavior-y: contain!important;
           scrollbar-width: none!important;
           -ms-overflow-style: none!important;
+        }
+
+        .lit-navbar-content {
+          min-height: 0;
         }
 
         .lit-navbar-hide-scrollbar::-webkit-scrollbar {
@@ -715,7 +725,7 @@ export class LayoutNavbar extends CustomElement {
       <div class="container-fluid">
         <div class="offcanvas offcanvas-start d-flex lit-navbar-canvas shadow" tabindex="-1" id="litLayoutNavbar">
           <div class="d-flex flex-row flex-grow-1 lit-navbar-hide-scrollbar">
-            <div class="d-flex flex-column flex-grow-1">
+            <div class="d-flex flex-column flex-grow-1 lit-navbar-content">
               <h1 class="mt-3" style="text-align:center;">
                 <img src="../static/img/logo-blue.png" alt="NAStool" class="lit-navbar-logo">
               </h1>
